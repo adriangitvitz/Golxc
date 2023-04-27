@@ -25,5 +25,7 @@ func main() {
 			"limits.cpu":    "4",
 		},
 	}
-	c.Createcontainer()
+	// c.Createcontainer()
+    // c.GetContainers()
+    c.GetContainer()
 }

@@ -4,8 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"go_lxc_socket/utils"
+	"log"
 	"net"
-	"time"
 )
 
 type Updatestate struct {
@@ -37,86 +38,10 @@ type Source struct {
 	Alias string `json:"alias"`
 }
 
-type Response struct {
-	Status    string   `json:"status"`
-	Metadata  Metadata `json:"metadata"`
-	Operation string   `json:"operation"`
-}
-
-type Metadata struct {
-	Id        string    `json:"id"`
-	Resources Resources `json:"resources"`
-	Status    string    `json:"status"`
-}
-
-type Resources struct {
-	Containers []string `json:"containers"`
-	Instances  []string `json:"instances"`
-}
-
-func (c Containers) getinstancestatus(operation string) (string, error) {
-	connection, err := net.Dial("unix", "/var/snap/lxd/common/lxd/unix.socket")
-	if err != nil {
-		fmt.Println(err)
-		return "", err
-	}
-	defer connection.Close()
-	_, err = connection.Write([]byte(fmt.Sprintf("GET %s/wait?timeout=3 HTTP/1.0\r\n\r\n", operation)))
-	if err != nil {
-		return "", err
-	}
-	// Used to read HTTP response
-	reader := bufio.NewReader(connection)
-	for {
-		// Read until new line
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return "", err
-		}
-		// Read until character return and new line
-		if line == "\r\n" {
-			break
-		}
-	}
-	body, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-	var data map[string]interface{}
-	error := json.Unmarshal([]byte(body), &data)
-	if error != nil {
-		return "", error
-	}
-	return data["status"].(string), nil
-}
-
-func (c Containers) waitforstatus(operation string) error {
-	statusch := make(chan string)
-	go func(operation string) {
-		for {
-			status, err := c.getinstancestatus(operation)
-			if err != nil {
-				statusch <- err.Error()
-				return
-			}
-			if status == "Success" {
-				statusch <- "Ready"
-				return
-			}
-			time.Sleep(1 * time.Second)
-		}
-	}(operation)
-	statusc := <-statusch
-	if statusc != "Ready" {
-		return fmt.Errorf("Error getting %s instance information", c.Name)
-	}
-	return nil
-}
-
 func (c Containers) UpdateStatus(instance string) (string, error) {
 	conn, err := net.Dial("unix", "/var/snap/lxd/common/lxd/unix.socket")
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 		return "", err
 	}
 	defer conn.Close()
@@ -128,20 +53,20 @@ func (c Containers) UpdateStatus(instance string) (string, error) {
 	}
 	container_update_status, err := json.Marshal(container_status)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 		return "", err
 	}
 	uri := fmt.Sprintf("PUT %s/state HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", instance, len(container_update_status), container_update_status)
 	_, err = conn.Write([]byte(uri))
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 		return "", err
 	}
 	reader := bufio.NewReader(conn)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Println(err)
+			log.Fatal(err)
 			return "", err
 		}
 		if line == "\r\n" {
@@ -150,40 +75,75 @@ func (c Containers) UpdateStatus(instance string) (string, error) {
 	}
 	body, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 		return "", err
 	}
 	var response_op Response
 	error := json.Unmarshal([]byte(body), &response_op)
 	if error != nil {
-		fmt.Println(error)
+		log.Fatal(err)
 		return "", error
 	}
 	return response_op.Operation, nil
 }
 
-func (c Containers) Createcontainer() {
+func (c Containers) GetContainers() (InstancesResponse, error) {
 	conn, err := net.Dial("unix", "/var/snap/lxd/common/lxd/unix.socket")
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
+		return InstancesResponse{}, err
+	}
+	defer conn.Close()
+	uri := fmt.Sprintf("GET /1.0/instances HTTP/1.0\r\n\r\n")
+	_, err = conn.Write([]byte(uri))
+	if err != nil {
+		log.Fatal(err)
+		return InstancesResponse{}, err
+	}
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatal(err)
+			return InstancesResponse{}, err
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	body, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatal(err)
+		return InstancesResponse{}, err
+	}
+	var response_op InstancesResponse
+	error := json.Unmarshal([]byte(body), &response_op)
+	if error != nil {
+		log.Fatal(err)
+		return InstancesResponse{}, err
+	}
+	return response_op, nil
+}
+
+// TODO: Get Container
+func (c Containers) GetContainer() {
+	conn, err := net.Dial("unix", "/var/snap/lxd/common/lxd/unix.socket")
+	if err != nil {
+		log.Fatal(err)
 		return
 	}
 	defer conn.Close()
-	container_payload, err := json.Marshal(c)
+	uri := fmt.Sprintf("GET /1.0/instances/%s HTTP/1.0\r\n\r\n", c.Name)
+	_, err = conn.Write([]byte(uri))
 	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	_, err = conn.Write([]byte(fmt.Sprintf("POST /1.0/instances HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(container_payload), container_payload)))
-	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 		return
 	}
 	reader := bufio.NewReader(conn)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Println(err)
+			log.Fatal(err)
 			return
 		}
 		if line == "\r\n" {
@@ -192,27 +152,73 @@ func (c Containers) Createcontainer() {
 	}
 	body, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
+		return
+	}
+	pretty, err := utils.Prettyprint(body)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	fmt.Println(pretty)
+}
+
+// TODO: Delete Container
+// TODO: Edit Container config
+
+func (c Containers) Createcontainer() {
+	conn, err := net.Dial("unix", "/var/snap/lxd/common/lxd/unix.socket")
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	defer conn.Close()
+	container_payload, err := json.Marshal(c)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	_, err = conn.Write([]byte(fmt.Sprintf("POST /1.0/instances HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(container_payload), container_payload)))
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	body, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatal(err)
 		return
 	}
 	var response_op Response
 	error := json.Unmarshal([]byte(body), &response_op)
 	if error != nil {
-		fmt.Println(error)
+		log.Fatal(err)
 		return
 	}
-	error = c.waitforstatus(response_op.Operation)
+	error = Waitforstatus(response_op.Operation)
 	if error != nil {
-		fmt.Println(error)
+		log.Fatal(err)
 		return
 	}
+	log.Println("Container created")
 	operation_status, error := c.UpdateStatus(response_op.Metadata.Resources.Instances[0])
 	if error != nil {
-		fmt.Println(error)
+		log.Fatal(error)
 		return
 	}
-	error = c.waitforstatus(operation_status)
+	error = Waitforstatus(operation_status)
 	if error != nil {
-		fmt.Println(error)
+		log.Fatal(error)
 	}
+	log.Println("Container started")
 }
