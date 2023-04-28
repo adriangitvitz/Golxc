@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"go_lxc_socket/utils"
 	"log"
 	"net"
 )
@@ -125,26 +124,25 @@ func (c Containers) GetContainers() (InstancesResponse, error) {
 	return response_op, nil
 }
 
-// TODO: Get Container
-func (c Containers) GetContainer() {
+func (c Containers) GetContainer() (SingleInstanceResponse, error) {
 	conn, err := net.Dial("unix", "/var/snap/lxd/common/lxd/unix.socket")
 	if err != nil {
 		log.Fatal(err)
-		return
+		return SingleInstanceResponse{}, err
 	}
 	defer conn.Close()
 	uri := fmt.Sprintf("GET /1.0/instances/%s HTTP/1.0\r\n\r\n", c.Name)
 	_, err = conn.Write([]byte(uri))
 	if err != nil {
 		log.Fatal(err)
-		return
+		return SingleInstanceResponse{}, err
 	}
 	reader := bufio.NewReader(conn)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			log.Fatal(err)
-			return
+			return SingleInstanceResponse{}, err
 		}
 		if line == "\r\n" {
 			break
@@ -153,14 +151,15 @@ func (c Containers) GetContainer() {
 	body, err := reader.ReadString('\n')
 	if err != nil {
 		log.Fatal(err)
-		return
+		return SingleInstanceResponse{}, err
 	}
-	pretty, err := utils.Prettyprint(body)
-	if err != nil {
+	var response_op SingleInstanceResponse
+	error := json.Unmarshal([]byte(body), &response_op)
+	if error != nil {
 		log.Fatal(err)
-		return
+		return SingleInstanceResponse{}, err
 	}
-	fmt.Println(pretty)
+	return response_op, err
 }
 
 // TODO: Delete Container
